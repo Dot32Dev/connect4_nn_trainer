@@ -2,11 +2,16 @@ use connect4_board_library::Bitboard;
 use nalgebra::{DMatrix, DVector};
 use rand::distributions::{Distribution, Uniform};
 use rand::Rng;
+use serde::{Deserialize, Serialize};
+use std::fs::File;
+use std::io::prelude::*;
 
+#[typetag::serde(tag = "type")]
 trait Participant {
     fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize);
 }
 
+#[derive(Serialize, Deserialize)]
 struct NeuralNetwork {
     layers: Vec<DMatrix<f64>>, // Weights for each layer
     biases: Vec<DVector<f64>>, // Biases for each layer
@@ -79,6 +84,7 @@ fn sort_indices_by_values(arr: &DVector<f64>) -> Vec<usize> {
     indices
 }
 
+#[typetag::serde]
 impl Participant for NeuralNetwork {
     fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize) {
         let input =
@@ -92,14 +98,17 @@ impl Participant for NeuralNetwork {
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct RandomAgent;
 
+#[typetag::serde]
 impl Participant for RandomAgent {
     fn make_move(&self, game: &mut Bitboard, _you: usize, _opponent: usize) {
         while !game.drop_piece(rand::thread_rng().gen_range(0..7)) {}
     }
 }
 
+#[derive(Serialize, Deserialize)]
 struct Tournament {
     participants: Vec<Vec<Box<dyn Participant>>>,
 }
@@ -195,29 +204,37 @@ impl Tournament {
             round += 1;
         }
     }
+
+    fn stats(&self) {
+        println!("The number of rounds was: {}", self.participants.len());
+        for i in 0..self.participants.len() {
+            println!(
+                "{} eliminated in round {}",
+                self.participants[i].len(),
+                i
+            );
+        }
+    }
 }
 
 fn main() {
-    let mut tournament = Tournament::new_random(100);
+    // let mut tournament = Tournament::new_random(100);
+
+    // let serialised = ron::ser::to_string_pretty(
+    //     &tournament,
+    //     ron::ser::PrettyConfig::default(),
+    // )
+    // .unwrap();
+
+    // let mut file = File::create("participants.ron").unwrap();
+    // file.write_all(serialised.as_bytes()).unwrap();
+
+    let mut file = File::open("participants.ron").unwrap();
+    let mut contents = String::new();
+    file.read_to_string(&mut contents).unwrap();
+
+    let mut tournament: Tournament = ron::from_str(&contents).unwrap();
+
     tournament.run_tournament();
-
-    // let network = NeuralNetwork::new(&[42, 64, 64, 7]);
-    // let mut game = Bitboard::new();
-
-    // loop {
-    //     let ai_1 = (game.move_counter & 1);
-    //     let ai_2 = 1 - (game.move_counter & 1);
-
-    //     network.select_move(&mut game, ai_1, ai_2);
-
-    //     if game.check_win() {
-    //         break;
-    //     }
-
-    //     if game.move_counter > 42 {
-    //         break;
-    //     }
-    // }
-
-    // println!("{}", game);
+    tournament.stats();
 }

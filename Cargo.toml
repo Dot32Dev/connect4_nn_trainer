@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-nalgebra = "0.33.0"
+nalgebra = { version = "0.33", features = ["serde-serialize"] }
 rand = "0.8.5"
 connect4_board_library = { git = "https://github.com/Dot32Dev/barebones_connectfour", rev = "546870e" }
+serde = { version = "1.0", features = ["derive"] }
+typetag = "0.2"
+ron = "0.8"
