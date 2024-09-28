@@ -1,3 +1,4 @@
+use connect4_board_library::Bitboard;
 use nalgebra::{DMatrix, DVector};
 use rand::distributions::{Distribution, Uniform};
 
@@ -63,6 +64,41 @@ fn bitboard_to_input(player1: u64, player2: u64) -> DVector<f64> {
     input
 }
 
+fn sort_indices_by_values(arr: &DVector<f64>) -> Vec<usize> {
+    let mut indices: Vec<usize> = (0..arr.len()).collect();
+
+    // Sort the indices based on the corresponding values in the DVector, in
+    // reverse for largest first
+    indices.sort_by(|&i, &j| arr[j].partial_cmp(&arr[i]).unwrap());
+
+    indices
+}
+
 fn main() {
     let network = NeuralNetwork::new(&[42, 64, 64, 7]);
+    let mut game = Bitboard::new();
+
+    loop {
+        let ai_1 = (game.move_counter & 1);
+        let ai_2 = 1 - (game.move_counter & 1);
+
+        let input = bitboard_to_input(game.players[ai_1], game.players[ai_2]);
+        let output = sort_indices_by_values(&network.forward(&input));
+
+        'placement: for i in 0..7 {
+            if game.drop_piece(output[i]) {
+                break 'placement;
+            }
+        }
+
+        if game.check_win() {
+            break;
+        }
+
+        if game.move_counter > 42 {
+            break;
+        }
+    }
+
+    println!("{}", game);
 }

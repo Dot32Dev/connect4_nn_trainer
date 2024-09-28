@@ -36,9 +36,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "baf1de4339761588bc0619e3cbc0120ee582ebb74b53b4efbf79117bd2da40fd"
 
 [[package]]
+name = "connect4_board_library"
+version = "0.1.0"
+source = "git+https://github.com/Dot32Dev/barebones_connectfour?rev=546870e#546870e48d8f7e649470649f72e0f8f90c7c8fde"
+
+[[package]]
 name = "connect4_nn_trainer"
 version = "0.1.0"
 dependencies = [
+ "connect4_board_library",
  "nalgebra",
  "rand",
 ]
