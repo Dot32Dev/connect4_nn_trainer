@@ -1,6 +1,11 @@
 use connect4_board_library::Bitboard;
 use nalgebra::{DMatrix, DVector};
 use rand::distributions::{Distribution, Uniform};
+use rand::Rng;
+
+trait Participant {
+    fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize);
+}
 
 struct NeuralNetwork {
     layers: Vec<DMatrix<f64>>, // Weights for each layer
@@ -74,31 +79,145 @@ fn sort_indices_by_values(arr: &DVector<f64>) -> Vec<usize> {
     indices
 }
 
-fn main() {
-    let network = NeuralNetwork::new(&[42, 64, 64, 7]);
-    let mut game = Bitboard::new();
-
-    loop {
-        let ai_1 = (game.move_counter & 1);
-        let ai_2 = 1 - (game.move_counter & 1);
-
-        let input = bitboard_to_input(game.players[ai_1], game.players[ai_2]);
-        let output = sort_indices_by_values(&network.forward(&input));
-
-        'placement: for i in 0..7 {
+impl Participant for NeuralNetwork {
+    fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize) {
+        let input =
+            bitboard_to_input(game.players[you], game.players[opponent]);
+        let output = sort_indices_by_values(&self.forward(&input));
+        for i in 0..7 {
             if game.drop_piece(output[i]) {
-                break 'placement;
+                return;
             }
         }
+    }
+}
 
-        if game.check_win() {
-            break;
+struct RandomAgent;
+
+impl Participant for RandomAgent {
+    fn make_move(&self, game: &mut Bitboard, _you: usize, _opponent: usize) {
+        while !game.drop_piece(rand::thread_rng().gen_range(0..7)) {}
+    }
+}
+
+struct Tournament {
+    participants: Vec<Vec<Box<dyn Participant>>>,
+}
+
+impl Tournament {
+    fn new_random(num_participants: usize) -> Self {
+        let mut participants = vec![vec![]];
+
+        // Add Neural Networks
+        for _ in 0..num_participants - 1 {
+            participants[0]
+                .push(Box::new(NeuralNetwork::new(&[42, 64, 64, 7]))
+                    as Box<dyn Participant>);
         }
 
-        if game.move_counter > 42 {
-            break;
-        }
+        // Add one RandomAgent
+        participants[0].push(Box::new(RandomAgent) as Box<dyn Participant>);
+
+        Self { participants }
     }
 
-    println!("{}", game);
+    fn run_tournament(&mut self) {
+        let mut round = 0;
+
+        while self.participants[round].len() > 1 {
+            // If the amount of participants is uneven, randomly move a participant
+            // to the next round.
+            let length = self.participants[round].len();
+            if length % 2 != 0 {
+                // Remove a random participant
+                let bye_index = rand::thread_rng().gen_range(0..length);
+                let bye = self.participants[round].remove(bye_index);
+
+                // If there is no next round, create it
+                if self.participants.len() <= round + 1 {
+                    self.participants.push(Vec::new());
+                }
+
+                // Add the removed participant to the next round
+                self.participants[round + 1].push(bye);
+            }
+
+            // Iterate over two AI's at a time and verse them together.
+            let mut full_idx = 0; // So that we can make the right person win.
+            let mut winners = Vec::new(); // Avoids multiple mutable borrow issues.
+
+            for pair in self.participants[round].chunks_exact(2) {
+                let mut game = Bitboard::new();
+
+                'game: loop {
+                    let you = (game.move_counter & 1);
+                    let opponent = 1 - (game.move_counter & 1);
+
+                    pair[you].make_move(&mut game, you, opponent);
+
+                    if game.check_win() {
+                        winners.push(full_idx + you);
+
+                        // Print the last round
+                        if self.participants[round].len() == 2 {
+                            println!("{}", game);
+                        }
+
+                        break 'game;
+                    }
+
+                    if game.move_counter >= 42 {
+                        // Oh well, promote both to the next round:
+                        winners.push(full_idx + you);
+                        winners.push(full_idx + opponent);
+                        break 'game;
+                    }
+
+                    // Print the last round
+                    if self.participants[round].len() == 2 {
+                        println!("{}", game);
+                    }
+                }
+
+                full_idx += 2;
+            }
+
+            // Move winners to the next round
+            if self.participants.len() <= round + 1 {
+                self.participants.push(Vec::new());
+            }
+            for winner_idx in winners.into_iter().rev() {
+                let winner = self.participants[round].remove(winner_idx);
+                self.participants[round + 1].push(winner);
+            }
+
+            // Advance to the next round
+            round += 1;
+        }
+    }
+}
+
+fn main() {
+    let mut tournament = Tournament::new_random(100);
+    tournament.run_tournament();
+
+    // let network = NeuralNetwork::new(&[42, 64, 64, 7]);
+    // let mut game = Bitboard::new();
+
+    // loop {
+    //     let ai_1 = (game.move_counter & 1);
+    //     let ai_2 = 1 - (game.move_counter & 1);
+
+    //     network.select_move(&mut game, ai_1, ai_2);
+
+    //     if game.check_win() {
+    //         break;
+    //     }
+
+    //     if game.move_counter > 42 {
+    //         break;
+    //     }
+    // }
+
+    // println!("{}", game);
 }
