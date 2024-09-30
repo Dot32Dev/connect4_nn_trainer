@@ -1,13 +1,17 @@
 use connect4_board_library::Bitboard;
 use nalgebra::{DMatrix, DVector};
 use rand::distributions::{Distribution, Uniform};
+use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use std::any::type_name;
+use std::fmt;
 use std::fs::File;
 use std::io::prelude::*;
+use std::time::{Duration, Instant};
 
 #[typetag::serde(tag = "type")]
-trait Participant {
+trait Participant: std::fmt::Debug {
     fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize);
 }
 
@@ -98,7 +102,25 @@ impl Participant for NeuralNetwork {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+fn type_name_of<T>(_: T) -> &'static str {
+    type_name::<T>()
+}
+
+impl fmt::Debug for NeuralNetwork {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // All I really want it to print is the type name
+        write!(
+            f,
+            "{}",
+            type_name_of(NeuralNetwork {
+                layers: Vec::new(),
+                biases: Vec::new()
+            })
+        )
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct RandomAgent;
 
 #[typetag::serde]
@@ -108,8 +130,37 @@ impl Participant for RandomAgent {
     }
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
+struct TowerAgent {
+    columns: [usize; 7],
+}
+
+impl TowerAgent {
+    fn new() -> Self {
+        let mut columns = [1, 2, 3, 4, 5, 6, 7];
+        let mut rng = rand::thread_rng();
+        columns.shuffle(&mut rng);
+        TowerAgent { columns }
+    }
+}
+
+#[typetag::serde]
+impl Participant for TowerAgent {
+    fn make_move(&self, game: &mut Bitboard, _you: usize, _opponent: usize) {
+        for i in 0..7 {
+            if game.drop_piece(self.columns[i]) {
+                return;
+            }
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 struct Tournament {
+    // Generation keeps track of how many tournaments have happened in the past.
+    generation: u32,
+    // The real world time the models have spent in training.
+    training_time: Duration,
     participants: Vec<Vec<Box<dyn Participant>>>,
 }
 
@@ -117,8 +168,8 @@ impl Tournament {
     fn new_random(num_participants: usize) -> Self {
         let mut participants = vec![vec![]];
 
-        // Add Neural Networks
-        for _ in 0..num_participants - 1 {
+        // Add Neural Networks (Subtracting 2 to account for other AIs)
+        for _ in 0..num_participants - 2 {
             participants[0]
                 .push(Box::new(NeuralNetwork::new(&[42, 64, 64, 7]))
                     as Box<dyn Participant>);
@@ -127,7 +178,15 @@ impl Tournament {
         // Add one RandomAgent
         participants[0].push(Box::new(RandomAgent) as Box<dyn Participant>);
 
-        Self { participants }
+        // Add one TowerAgent
+        participants[0]
+            .push(Box::new(TowerAgent::new()) as Box<dyn Participant>);
+
+        Self {
+            generation: 0,
+            training_time: Duration::new(0, 0),
+            participants,
+        }
     }
 
     fn run_tournament(&mut self) {
@@ -168,6 +227,10 @@ impl Tournament {
                         winners.push(full_idx + you);
 
                         // Print the last round
+                        println!(
+                            "{:?}",
+                            self.participants[round][full_idx + you]
+                        );
                         if self.participants[round].len() == 2 {
                             println!("{}", game);
                         }
@@ -206,7 +269,9 @@ impl Tournament {
     }
 
     fn stats(&self) {
+        println!("Generation {}", self.generation);
         println!("The number of rounds was: {}", self.participants.len());
+        println!("{} seconds spent in training", self.training_time.as_secs());
         for i in 0..self.participants.len() {
             println!(
                 "{} eliminated in round {}",
@@ -218,7 +283,7 @@ impl Tournament {
 }
 
 fn main() {
-    // let mut tournament = Tournament::new_random(100);
+    let mut tournament = Tournament::new_random(100);
 
     // let serialised = ron::ser::to_string_pretty(
     //     &tournament,
@@ -229,11 +294,11 @@ fn main() {
     // let mut file = File::create("participants.ron").unwrap();
     // file.write_all(serialised.as_bytes()).unwrap();
 
-    let mut file = File::open("participants.ron").unwrap();
-    let mut contents = String::new();
-    file.read_to_string(&mut contents).unwrap();
+    // let mut file = File::open("participants.ron").unwrap();
+    // let mut contents = String::new();
+    // file.read_to_string(&mut contents).unwrap();
 
-    let mut tournament: Tournament = ron::from_str(&contents).unwrap();
+    // let mut tournament: Tournament = ron::from_str(&contents).unwrap();
 
     tournament.run_tournament();
     tournament.stats();
