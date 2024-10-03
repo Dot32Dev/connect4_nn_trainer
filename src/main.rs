@@ -6,8 +6,9 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::any::type_name;
 use std::fmt;
-use std::fs::File;
-use std::io::prelude::*;
+use std::fs::{self, File};
+use std::io::{Read, Write};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 #[typetag::serde(tag = "type")]
@@ -137,7 +138,7 @@ struct TowerAgent {
 
 impl TowerAgent {
     fn new() -> Self {
-        let mut columns = [1, 2, 3, 4, 5, 6, 7];
+        let mut columns = [0, 1, 2, 3, 4, 5, 6];
         let mut rng = rand::thread_rng();
         columns.shuffle(&mut rng);
         TowerAgent { columns }
@@ -190,15 +191,19 @@ impl Tournament {
     }
 
     fn run_tournament(&mut self) {
+        let start = Instant::now();
+
         let mut round = 0;
 
         while self.participants[round].len() > 1 {
+            let mut rng = rand::thread_rng();
+            self.participants[round].shuffle(&mut rng);
             // If the amount of participants is uneven, randomly move a participant
             // to the next round.
             let length = self.participants[round].len();
             if length % 2 != 0 {
                 // Remove a random participant
-                let bye_index = rand::thread_rng().gen_range(0..length);
+                let bye_index = rng.gen_range(0..length);
                 let bye = self.participants[round].remove(bye_index);
 
                 // If there is no next round, create it
@@ -215,40 +220,62 @@ impl Tournament {
             let mut winners = Vec::new(); // Avoids multiple mutable borrow issues.
 
             for pair in self.participants[round].chunks_exact(2) {
-                let mut game = Bitboard::new();
+                let mut game_count = 0;
+                let mut player_wins = [0; 2];
+                for _ in 0..2 {
+                    let mut game = Bitboard::new();
 
-                'game: loop {
-                    let you = (game.move_counter & 1);
-                    let opponent = 1 - (game.move_counter & 1);
+                    'game: loop {
+                        let mut you = game.move_counter & 1;
+                        let mut opponent = 1 - (game.move_counter & 1);
 
-                    pair[you].make_move(&mut game, you, opponent);
+                        if game_count == 1 {
+                            you = 1 - (game.move_counter & 1);
+                            opponent = game.move_counter & 1;
+                        }
 
-                    if game.check_win() {
-                        winners.push(full_idx + you);
+                        pair[you].make_move(&mut game, you, opponent);
+
+                        if game.check_win() {
+                            // winners.push(full_idx + you);
+                            player_wins[you] += 1;
+
+                            // Print the last round
+                            if self.participants[round].len() == 2 {
+                                println!(
+                                    "{:?}",
+                                    self.participants[round][full_idx + you]
+                                );
+                                println!("{}", game);
+                            }
+
+                            break 'game;
+                        }
+
+                        if game.move_counter >= 42 {
+                            // Oh well, promote both to the next round:
+                            // winners.push(full_idx + you);
+                            // winners.push(full_idx + opponent);
+                            player_wins[you] += 1;
+                            player_wins[opponent] += 1;
+                            break 'game;
+                        }
 
                         // Print the last round
-                        println!(
-                            "{:?}",
-                            self.participants[round][full_idx + you]
-                        );
                         if self.participants[round].len() == 2 {
                             println!("{}", game);
                         }
-
-                        break 'game;
+                        game_count += 1;
                     }
-
-                    if game.move_counter >= 42 {
-                        // Oh well, promote both to the next round:
-                        winners.push(full_idx + you);
-                        winners.push(full_idx + opponent);
-                        break 'game;
-                    }
-
-                    // Print the last round
-                    if self.participants[round].len() == 2 {
-                        println!("{}", game);
-                    }
+                }
+                if player_wins[0] > player_wins[1] {
+                    winners.push(full_idx + 0);
+                } else if player_wins[0] == player_wins[1] {
+                    // Actually, maybe drawed players should both not go higher
+                    // winners.push(full_idx + 0);
+                    // winners.push(full_idx + 1);
+                } else {
+                    winners.push(full_idx + 1);
                 }
 
                 full_idx += 2;
@@ -258,6 +285,7 @@ impl Tournament {
             if self.participants.len() <= round + 1 {
                 self.participants.push(Vec::new());
             }
+            winners.sort_unstable();
             for winner_idx in winners.into_iter().rev() {
                 let winner = self.participants[round].remove(winner_idx);
                 self.participants[round + 1].push(winner);
@@ -266,6 +294,10 @@ impl Tournament {
             // Advance to the next round
             round += 1;
         }
+
+        let duration = start.elapsed();
+        self.generation += 1;
+        self.training_time += duration;
     }
 
     fn stats(&self) {
@@ -280,6 +312,30 @@ impl Tournament {
             );
         }
     }
+}
+
+fn save_tournament(tournament: &Tournament, folder: &Path) {
+    let filename = format!("Generation {}.ron", tournament.generation);
+    let filepath = folder.join(filename);
+
+    let serialized = ron::ser::to_string_pretty(
+        tournament,
+        ron::ser::PrettyConfig::default(),
+    )
+    .expect("Failed to serialize tournament");
+
+    let mut file = File::create(filepath).expect("Failed to create file");
+    file.write_all(serialized.as_bytes())
+        .expect("Failed to write to file");
+}
+
+fn load_tournament(filepath: impl AsRef<Path>) -> Tournament {
+    let mut file = File::open(filepath).expect("Failed to open file");
+    let mut contents = String::new();
+    file.read_to_string(&mut contents)
+        .expect("Failed to read file");
+
+    ron::from_str(&contents).expect("Failed to deserialize tournament")
 }
 
 fn main() {
