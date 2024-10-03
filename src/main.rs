@@ -18,6 +18,7 @@ trait Participant: std::fmt::Debug {
 
 #[derive(Serialize, Deserialize)]
 struct NeuralNetwork {
+    id: u8,
     layers: Vec<DMatrix<f64>>, // Weights for each layer
     biases: Vec<DVector<f64>>, // Biases for each layer
 }
@@ -50,7 +51,11 @@ impl NeuralNetwork {
             biases.push(bias);
         }
 
-        NeuralNetwork { layers, biases }
+        NeuralNetwork {
+            id: rng.gen::<u8>(),
+            layers,
+            biases,
+        }
     }
 
     fn forward(&self, input: &DVector<f64>) -> DVector<f64> {
@@ -112,11 +117,13 @@ impl fmt::Debug for NeuralNetwork {
         // All I really want it to print is the type name
         write!(
             f,
-            "{}",
+            "{}, id: {}",
             type_name_of(NeuralNetwork {
+                id: 0,
                 layers: Vec::new(),
                 biases: Vec::new()
-            })
+            }),
+            self.id
         )
     }
 }
@@ -243,8 +250,11 @@ impl Tournament {
                             // Print the last round
                             if self.participants[round].len() == 2 {
                                 println!(
-                                    "{:?}",
-                                    self.participants[round][full_idx + you]
+                                    "Game {} winner: {:?}\n loser {:?}",
+                                    game_count + 1,
+                                    self.participants[round][full_idx + you],
+                                    self.participants[round]
+                                        [full_idx + opponent]
                                 );
                                 println!("{}", game);
                             }
@@ -261,12 +271,12 @@ impl Tournament {
                             break 'game;
                         }
 
-                        // Print the last round
-                        if self.participants[round].len() == 2 {
-                            println!("{}", game);
-                        }
-                        game_count += 1;
+                        // // Print the last round
+                        // if self.participants[round].len() == 2 {
+                        //     println!("{}", game);
+                        // }
                     }
+                    game_count += 1;
                 }
                 if player_wins[0] > player_wins[1] {
                     winners.push(full_idx + 0);
@@ -312,6 +322,18 @@ impl Tournament {
             );
         }
     }
+
+    fn flatten_participants(&mut self) {
+        let mut flattened = Vec::new();
+
+        // Move all participants from all rounds into the flattened vector
+        for round in self.participants.drain(..) {
+            flattened.extend(round);
+        }
+
+        // Replace the old participants structure with the flattened version
+        self.participants = vec![flattened];
+    }
 }
 
 fn save_tournament(tournament: &Tournament, folder: &Path) {
@@ -339,23 +361,40 @@ fn load_tournament(filepath: impl AsRef<Path>) -> Tournament {
 }
 
 fn main() {
-    let mut tournament = Tournament::new_random(100);
+    let history_folder = Path::new("network_history");
+    let mut tournament: Tournament;
 
-    // let serialised = ron::ser::to_string_pretty(
-    //     &tournament,
-    //     ron::ser::PrettyConfig::default(),
-    // )
-    // .unwrap();
+    // Create the network_history folder if it doesn't exist
+    fs::create_dir_all(history_folder)
+        .expect("Failed to create network_history folder");
 
-    // let mut file = File::create("participants.ron").unwrap();
-    // file.write_all(serialised.as_bytes()).unwrap();
+    // Check if the folder is empty
+    let mut entries = fs::read_dir(history_folder)
+        .expect("Failed to read network_history folder")
+        .collect::<Result<Vec<_>, _>>()
+        .expect("Failed to collect directory entries");
+    entries.sort_by_key(|entry| entry.file_name());
 
-    // let mut file = File::open("participants.ron").unwrap();
-    // let mut contents = String::new();
-    // file.read_to_string(&mut contents).unwrap();
+    if entries.is_empty() {
+        // Create a new tournament if the folder is empty
+        tournament = Tournament::new_random(100);
+        save_tournament(&tournament, history_folder);
+    } else {
+        // Load the most recent generation
+        let latest_file = entries.last().unwrap();
+        tournament = load_tournament(latest_file.path());
+    }
 
-    // let mut tournament: Tournament = ron::from_str(&contents).unwrap();
+    loop {
+        // Run for one minute before saving to file
+        let start_time = Instant::now();
+        let duration = Duration::from_secs(60);
 
-    tournament.run_tournament();
-    tournament.stats();
+        while start_time.elapsed() < duration {
+            tournament.flatten_participants();
+            tournament.run_tournament();
+            tournament.stats();
+        }
+        save_tournament(&tournament, history_folder);
+    }
 }
