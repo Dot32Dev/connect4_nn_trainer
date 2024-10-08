@@ -5,8 +5,11 @@ use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::any::type_name;
+use std::any::TypeId;
 use std::fmt;
+use std::fs::OpenOptions;
 use std::fs::{self, File};
+use std::io::BufWriter;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -14,6 +17,7 @@ use std::time::{Duration, Instant};
 #[typetag::serde(tag = "type")]
 trait Participant: std::fmt::Debug {
     fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize);
+    fn type_id(&self) -> TypeId;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -106,6 +110,10 @@ impl Participant for NeuralNetwork {
             }
         }
     }
+
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<Self>()
+    }
 }
 
 fn type_name_of<T>(_: T) -> &'static str {
@@ -136,6 +144,10 @@ impl Participant for RandomAgent {
     fn make_move(&self, game: &mut Bitboard, _you: usize, _opponent: usize) {
         while !game.drop_piece(rand::thread_rng().gen_range(0..7)) {}
     }
+
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<Self>()
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -161,7 +173,16 @@ impl Participant for TowerAgent {
             }
         }
     }
+
+    fn type_id(&self) -> TypeId {
+        TypeId::of::<Self>()
+    }
 }
+
+// fn is_special_agent(participant: &Box<dyn Participant>) -> bool {
+//     participant.type_id() == TypeId::of::<TowerAgent>()
+//         || participant.type_id() == TypeId::of::<RandomAgent>()
+// }
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Tournament {
@@ -323,6 +344,37 @@ impl Tournament {
         }
     }
 
+    fn find_special_agents(&self) -> (usize, usize) {
+        let mut tower_agent_round = 0;
+        let mut random_agent_round = 0;
+
+        for (i, round) in self.participants.iter().enumerate() {
+            for agent in round {
+                if agent.type_id() == TypeId::of::<TowerAgent>() {
+                    tower_agent_round = i;
+                }
+                if agent.type_id() == TypeId::of::<RandomAgent>() {
+                    random_agent_round = i;
+                }
+            }
+        }
+
+        return (
+            self.find_participants_below_round(tower_agent_round),
+            self.find_participants_below_round(random_agent_round),
+        );
+    }
+
+    fn find_participants_below_round(&self, target_round: usize) -> usize {
+        let mut participants = 0;
+        for round in self.participants.iter().take(target_round) {
+            for _ in round {
+                participants += 1;
+            }
+        }
+        return participants;
+    }
+
     fn flatten_participants(&mut self) {
         let mut flattened = Vec::new();
 
@@ -360,6 +412,28 @@ fn load_tournament(filepath: impl AsRef<Path>) -> Tournament {
     ron::from_str(&contents).expect("Failed to deserialize tournament")
 }
 
+fn save_special_agents(agents: Vec<(usize, usize)>, generation: u32) {
+    // Open the file for appending, create if it doesn't exist
+    let file = OpenOptions::new()
+        .append(true)
+        .create(true)
+        .open("special_agents.csv")
+        .unwrap();
+    let mut writer = BufWriter::new(file);
+
+    // If the CSV was empty, add the column names
+    if writer.get_ref().metadata().unwrap().len() == 0 {
+        writeln!(writer, "Generation, Tower Agent, Random Agent").unwrap();
+    }
+
+    // Append agents with generation number
+    let length = agents.len();
+    for (i, (tower_agent, random_agent)) in agents.into_iter().enumerate() {
+        let gen = generation as usize - (length - 1 - i); // Decrease generation
+        writeln!(writer, "{}, {}, {}", gen, tower_agent, random_agent).unwrap();
+    }
+}
+
 fn main() {
     let history_folder = Path::new("network_history");
     let mut tournament: Tournament;
@@ -390,11 +464,20 @@ fn main() {
         let start_time = Instant::now();
         let duration = Duration::from_secs(60);
 
+        // Keep track of how well special agents do each round, only save them
+        // to file after the one minute has finished.
+        let mut special_agents: Vec<(usize, usize)> = Vec::new();
+
+        // Run generations
         while start_time.elapsed() < duration {
             tournament.flatten_participants();
             tournament.run_tournament();
             tournament.stats();
+            special_agents.push(tournament.find_special_agents());
         }
+
+        // Save data to file
         save_tournament(&tournament, history_folder);
+        save_special_agents(special_agents, tournament.generation);
     }
 }
