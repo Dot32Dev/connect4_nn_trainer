@@ -18,6 +18,7 @@ use std::time::{Duration, Instant};
 trait Participant: std::fmt::Debug {
     fn make_move(&self, game: &mut Bitboard, you: usize, opponent: usize);
     fn type_id(&self) -> TypeId;
+    fn adjust(&mut self, range: f64);
 }
 
 #[derive(Serialize, Deserialize)]
@@ -114,6 +115,14 @@ impl Participant for NeuralNetwork {
     fn type_id(&self) -> TypeId {
         TypeId::of::<Self>()
     }
+
+    fn adjust(&mut self, range: f64) {
+        for (layer, bias) in self.layers.iter_mut().zip(self.biases.iter_mut())
+        {
+            layer.apply(|w| *w += range * (2.0 * rand::random::<f64>() - 1.0));
+            bias.apply(|b| *b += range * (2.0 * rand::random::<f64>() - 1.0));
+        }
+    }
 }
 
 fn type_name_of<T>(_: T) -> &'static str {
@@ -148,6 +157,8 @@ impl Participant for RandomAgent {
     fn type_id(&self) -> TypeId {
         TypeId::of::<Self>()
     }
+
+    fn adjust(&mut self, _: f64) {}
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -176,6 +187,11 @@ impl Participant for TowerAgent {
 
     fn type_id(&self) -> TypeId {
         TypeId::of::<Self>()
+    }
+
+    fn adjust(&mut self, _: f64) {
+        let mut rng = rand::thread_rng();
+        self.columns.shuffle(&mut rng);
     }
 }
 
@@ -368,9 +384,7 @@ impl Tournament {
     fn find_participants_below_round(&self, target_round: usize) -> usize {
         let mut participants = 0;
         for round in self.participants.iter().take(target_round) {
-            for _ in round {
-                participants += 1;
-            }
+            participants += round.len();
         }
         return participants;
     }
@@ -385,6 +399,25 @@ impl Tournament {
 
         // Replace the old participants structure with the flattened version
         self.participants = vec![flattened];
+    }
+
+    fn adjust_agents(&mut self) {
+        let total_participants = self
+            .find_participants_below_round(self.participants.len() + 1)
+            as f64;
+
+        let mut participants = 0 as f64;
+        for round in self.participants.iter_mut() {
+            participants += round.len() as f64;
+            let score = 1.0
+                - (participants - round.len() as f64 / 2.0)
+                    / total_participants;
+            if score > 0.2 {
+                for agent in round.iter_mut() {
+                    agent.adjust(0.04 * score);
+                }
+            }
+        }
     }
 }
 
@@ -474,6 +507,7 @@ fn main() {
             tournament.run_tournament();
             tournament.stats();
             special_agents.push(tournament.find_special_agents());
+            tournament.adjust_agents();
         }
 
         // Save data to file
