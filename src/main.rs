@@ -206,92 +206,62 @@ struct Tournament {
     generation: u32,
     // The real world time the models have spent in training.
     training_time: Duration,
-    participants: Vec<Vec<Box<dyn Participant>>>,
+    // participants: Vec<Vec<Box<dyn Participant>>>,
+    participants: Vec<Box<dyn Participant>>,
+    participants_win_count: Vec<usize>,
 }
 
 impl Tournament {
     fn new_random(num_participants: usize) -> Self {
-        let mut participants = vec![vec![]];
+        let mut participants = Vec::with_capacity(num_participants);
+        let mut participants_win_count = Vec::with_capacity(num_participants);
 
         // Add Neural Networks (Subtracting 2 to account for other AIs)
         for _ in 0..num_participants - 2 {
-            participants[0]
-                .push(Box::new(NeuralNetwork::new(&[42, 64, 64, 7]))
-                    as Box<dyn Participant>);
+            participants.push(Box::new(NeuralNetwork::new(&[42, 64, 64, 7]))
+                as Box<dyn Participant>);
+            participants_win_count.push(0);
         }
 
         // Add one RandomAgent
-        participants[0].push(Box::new(RandomAgent) as Box<dyn Participant>);
+        participants.push(Box::new(RandomAgent) as Box<dyn Participant>);
+        participants_win_count.push(0);
 
         // Add one TowerAgent
-        participants[0]
-            .push(Box::new(TowerAgent::new()) as Box<dyn Participant>);
+        participants.push(Box::new(TowerAgent::new()) as Box<dyn Participant>);
+        participants_win_count.push(0);
 
         Self {
             generation: 0,
             training_time: Duration::new(0, 0),
             participants,
+            participants_win_count,
         }
     }
 
     fn run_tournament(&mut self) {
-        let start = Instant::now();
-
-        let mut round = 0;
-
-        while self.participants[round].len() > 1 {
-            let mut rng = rand::thread_rng();
-            self.participants[round].shuffle(&mut rng);
-            // If the amount of participants is uneven, randomly move a participant
-            // to the next round.
-            let length = self.participants[round].len();
-            if length % 2 != 0 {
-                // Remove a random participant
-                let bye_index = rng.gen_range(0..length);
-                let bye = self.participants[round].remove(bye_index);
-
-                // If there is no next round, create it
-                if self.participants.len() <= round + 1 {
-                    self.participants.push(Vec::new());
-                }
-
-                // Add the removed participant to the next round
-                self.participants[round + 1].push(bye);
-            }
-
-            // Iterate over two AI's at a time and verse them together.
-            let mut full_idx = 0; // So that we can make the right person win.
-            let mut winners = Vec::new(); // Avoids multiple mutable borrow issues.
-
-            for pair in self.participants[round].chunks_exact(2) {
-                let mut game_count = 0;
-                let mut player_wins = [0; 2];
-                for _ in 0..2 {
+        for (i, agent) in self.participants.iter().enumerate() {
+            for (j, opponent) in self.participants.iter().enumerate() {
+                if i != j {
                     let mut game = Bitboard::new();
-
+                    let pair = [agent, opponent];
+                    let pair_index = [i, j];
                     'game: loop {
-                        let mut you = game.move_counter & 1;
-                        let mut opponent = 1 - (game.move_counter & 1);
+                        let agent = game.move_counter & 1;
+                        let opponent = 1 - (game.move_counter & 1);
 
-                        if game_count == 1 {
-                            you = 1 - (game.move_counter & 1);
-                            opponent = game.move_counter & 1;
-                        }
-
-                        pair[you].make_move(&mut game, you, opponent);
+                        pair[agent].make_move(&mut game, agent, opponent);
 
                         if game.check_win() {
-                            // winners.push(full_idx + you);
-                            player_wins[you] += 1;
+                            // winners.push(full_idx + agent);
+                            // player_wins[agent] += 1;
+                            self.participants_win_count[pair_index[agent]] += 1;
 
                             // Print the last round
-                            if self.participants[round].len() == 2 {
+                            if i == self.participants.len() - 1 {
                                 println!(
-                                    "Game {} winner: {:?}\n loser {:?}",
-                                    game_count + 1,
-                                    self.participants[round][full_idx + you],
-                                    self.participants[round]
-                                        [full_idx + opponent]
+                                    "Winner: {:?}\n loser {:?}",
+                                    pair[agent], pair[opponent],
                                 );
                                 println!("{}", game);
                             }
@@ -300,122 +270,237 @@ impl Tournament {
                         }
 
                         if game.move_counter >= 42 {
-                            // Oh well, promote both to the next round:
-                            // winners.push(full_idx + you);
-                            // winners.push(full_idx + opponent);
-                            player_wins[you] += 1;
-                            player_wins[opponent] += 1;
                             break 'game;
                         }
 
-                        // // Print the last round
-                        // if self.participants[round].len() == 2 {
-                        //     println!("{}", game);
-                        // }
+                        // Print the last round
+                        if i == self.participants.len() - 1 {
+                            println!("{}", game);
+                        }
                     }
-                    game_count += 1;
                 }
-                if player_wins[0] > player_wins[1] {
-                    winners.push(full_idx + 0);
-                } else if player_wins[0] == player_wins[1] {
-                    // Actually, maybe drawed players should both not go higher
-                    // winners.push(full_idx + 0);
-                    // winners.push(full_idx + 1);
-                } else {
-                    winners.push(full_idx + 1);
-                }
-
-                full_idx += 2;
             }
-
-            // Move winners to the next round
-            if self.participants.len() <= round + 1 {
-                self.participants.push(Vec::new());
-            }
-            winners.sort_unstable();
-            for winner_idx in winners.into_iter().rev() {
-                let winner = self.participants[round].remove(winner_idx);
-                self.participants[round + 1].push(winner);
-            }
-
-            // Advance to the next round
-            round += 1;
         }
 
-        let duration = start.elapsed();
         self.generation += 1;
-        self.training_time += duration;
     }
+
+    fn sort_by_wins(&mut self) {
+        let mut indices: Vec<usize> = (0..self.participants.len()).collect();
+        indices.sort_by(|&a, &b| {
+            self.participants_win_count[b].cmp(&self.participants_win_count[a])
+        });
+
+        for i in 0..self.participants.len() {
+            while indices[i] != i {
+                let j = indices[i];
+                self.participants.swap(i, j);
+                indices.swap(i, j);
+            }
+        }
+
+        // Reset the participants_win_count array
+        self.participants_win_count.fill(0);
+    }
+
+    // fn run_tournament(&mut self) {
+    //     let start = Instant::now();
+
+    //     let mut round = 0;
+
+    //     while self.participants[round].len() > 1 {
+    //         let mut rng = rand::thread_rng();
+    //         self.participants[round].shuffle(&mut rng);
+    //         // If the amount of participants is uneven, randomly move a participant
+    //         // to the next round.
+    //         let length = self.participants[round].len();
+    //         if length % 2 != 0 {
+    //             // Remove a random participant
+    //             let bye_index = rng.gen_range(0..length);
+    //             let bye = self.participants[round].remove(bye_index);
+
+    //             // If there is no next round, create it
+    //             if self.participants.len() <= round + 1 {
+    //                 self.participants.push(Vec::new());
+    //             }
+
+    //             // Add the removed participant to the next round
+    //             self.participants[round + 1].push(bye);
+    //         }
+
+    //         // Iterate over two AI's at a time and verse them together.
+    //         let mut full_idx = 0; // So that we can make the right person win.
+    //         let mut winners = Vec::new(); // Avoids multiple mutable borrow issues.
+
+    //         for pair in self.participants[round].chunks_exact(2) {
+    //             let mut game_count = 0;
+    //             let mut player_wins = [0; 2];
+    //             for _ in 0..2 {
+    //                 let mut game = Bitboard::new();
+
+    //                 'game: loop {
+    //                     let mut you = game.move_counter & 1;
+    //                     let mut opponent = 1 - (game.move_counter & 1);
+
+    //                     if game_count == 1 {
+    //                         you = 1 - (game.move_counter & 1);
+    //                         opponent = game.move_counter & 1;
+    //                     }
+
+    //                     pair[you].make_move(&mut game, you, opponent);
+
+    //                     if game.check_win() {
+    //                         // winners.push(full_idx + you);
+    //                         player_wins[you] += 1;
+
+    //                         // Print the last round
+    //                         if self.participants[round].len() == 2 {
+    //                             println!(
+    //                                 "Game {} winner: {:?}\n loser {:?}",
+    //                                 game_count + 1,
+    //                                 self.participants[round][full_idx + you],
+    //                                 self.participants[round]
+    //                                     [full_idx + opponent]
+    //                             );
+    //                             println!("{}", game);
+    //                         }
+
+    //                         break 'game;
+    //                     }
+
+    //                     if game.move_counter >= 42 {
+    //                         // Oh well, promote both to the next round:
+    //                         // winners.push(full_idx + you);
+    //                         // winners.push(full_idx + opponent);
+    //                         player_wins[you] += 1;
+    //                         player_wins[opponent] += 1;
+    //                         break 'game;
+    //                     }
+
+    //                     // // Print the last round
+    //                     // if self.participants[round].len() == 2 {
+    //                     //     println!("{}", game);
+    //                     // }
+    //                 }
+    //                 game_count += 1;
+    //             }
+    //             if player_wins[0] > player_wins[1] {
+    //                 winners.push(full_idx + 0);
+    //             } else if player_wins[0] == player_wins[1] {
+    //                 // Actually, maybe drawed players should both not go higher
+    //                 // winners.push(full_idx + 0);
+    //                 // winners.push(full_idx + 1);
+    //             } else {
+    //                 winners.push(full_idx + 1);
+    //             }
+
+    //             full_idx += 2;
+    //         }
+
+    //         // Move winners to the next round
+    //         if self.participants.len() <= round + 1 {
+    //             self.participants.push(Vec::new());
+    //         }
+    //         winners.sort_unstable();
+    //         for winner_idx in winners.into_iter().rev() {
+    //             let winner = self.participants[round].remove(winner_idx);
+    //             self.participants[round + 1].push(winner);
+    //         }
+
+    //         // Advance to the next round
+    //         round += 1;
+    //     }
+
+    //     let duration = start.elapsed();
+    //     self.generation += 1;
+    //     self.training_time += duration;
+    // }
 
     fn stats(&self) {
         println!("Generation {}", self.generation);
-        println!("The number of rounds was: {}", self.participants.len());
+        // println!("The number of agents was: {}", self.participants.len());
         println!("{} seconds spent in training", self.training_time.as_secs());
-        for i in 0..self.participants.len() {
-            println!(
-                "{} eliminated in round {}",
-                self.participants[i].len(),
-                i
-            );
-        }
+        // for i in 0..self.participants.len() {
+        //     println!(
+        //         "{} eliminated in round {}",
+        //         self.participants[i].len(),
+        //         i
+        //     );
+        // }
     }
 
     fn find_special_agents(&self) -> (usize, usize) {
-        let mut tower_agent_round = 0;
-        let mut random_agent_round = 0;
+        let mut tower_agent_index = 0;
+        let mut random_agent_index = 0;
 
-        for (i, round) in self.participants.iter().enumerate() {
-            for agent in round {
-                if agent.type_id() == TypeId::of::<TowerAgent>() {
-                    tower_agent_round = i;
-                }
-                if agent.type_id() == TypeId::of::<RandomAgent>() {
-                    random_agent_round = i;
-                }
+        for (i, agent) in self.participants.iter().enumerate() {
+            if agent.type_id() == TypeId::of::<TowerAgent>() {
+                tower_agent_index = i;
+            }
+            if agent.type_id() == TypeId::of::<RandomAgent>() {
+                random_agent_index = i;
             }
         }
 
-        return (
-            self.find_participants_below_round(tower_agent_round),
-            self.find_participants_below_round(random_agent_round),
-        );
+        return (tower_agent_index, random_agent_index);
+
+        // for (i, round) in self.participants.iter().enumerate() {
+        //     for agent in round {
+        //         if agent.type_id() == TypeId::of::<TowerAgent>() {
+        //             tower_agent_round = i;
+        //         }
+        //         if agent.type_id() == TypeId::of::<RandomAgent>() {
+        //             random_agent_round = i;
+        //         }
+        //     }
+        // }
+
+        // return (
+        //     self.find_participants_below_round(tower_agent_round),
+        //     self.find_participants_below_round(random_agent_round),
+        // );
     }
 
-    fn find_participants_below_round(&self, target_round: usize) -> usize {
-        let mut participants = 0;
-        for round in self.participants.iter().take(target_round) {
-            participants += round.len();
-        }
-        return participants;
-    }
+    // fn find_participants_below_round(&self, target_round: usize) -> usize {
+    //     let mut participants = 0;
+    //     for round in self.participants.iter().take(target_round) {
+    //         participants += round.len();
+    //     }
+    //     return participants;
+    // }
 
-    fn flatten_participants(&mut self) {
-        let mut flattened = Vec::new();
+    // fn flatten_participants(&mut self) {
+    //     let mut flattened = Vec::new();
 
-        // Move all participants from all rounds into the flattened vector
-        for round in self.participants.drain(..) {
-            flattened.extend(round);
-        }
+    //     // Move all participants from all rounds into the flattened vector
+    //     for round in self.participants.drain(..) {
+    //         flattened.extend(round);
+    //     }
 
-        // Replace the old participants structure with the flattened version
-        self.participants = vec![flattened];
-    }
+    //     // Replace the old participants structure with the flattened version
+    //     self.participants = vec![flattened];
+    // }
 
     fn adjust_agents(&mut self) {
-        let total_participants = self
-            .find_participants_below_round(self.participants.len() + 1)
-            as f64;
+        let total_participants = self.participants.len() as f64;
 
-        let mut participants = 0 as f64;
-        for round in self.participants.iter_mut() {
-            participants += round.len() as f64;
-            let score = 1.0
-                - (participants - round.len() as f64 / 2.0)
-                    / total_participants;
-            if score > 0.2 {
-                for agent in round.iter_mut() {
-                    agent.adjust(0.04 * score);
-                }
+        // let mut participants = 0 as f64;
+        // for round in self.participants.iter_mut() {
+        //     participants += round.len() as f64;
+        //     let score = 1.0
+        //         - (participants - round.len() as f64 / 2.0)
+        //             / total_participants;
+        //     if score > 0.2 {
+        //         for agent in round.iter_mut() {
+        //             agent.adjust(0.04 * score);
+        //         }
+        //     }
+        // }
+
+        for (i, agent) in self.participants.iter_mut().enumerate() {
+            let range_multiplier: f64 = 1.0 - total_participants / i as f64;
+            if range_multiplier > 0.2 {
+                agent.adjust(range_multiplier * 0.04);
             }
         }
     }
@@ -492,26 +577,34 @@ fn main() {
         tournament = load_tournament(latest_file.path());
     }
 
-    loop {
-        // Run for one minute before saving to file
-        let start_time = Instant::now();
-        let duration = Duration::from_secs(60);
+    let latest_file = entries.last().unwrap();
+    tournament = load_tournament(latest_file.path());
+    tournament.run_tournament();
 
-        // Keep track of how well special agents do each round, only save them
-        // to file after the one minute has finished.
-        let mut special_agents: Vec<(usize, usize)> = Vec::new();
+    // loop {
+    //     // Run for one minute before saving to file
+    //     let start_time = Instant::now();
+    //     let duration = Duration::from_secs(60);
 
-        // Run generations
-        while start_time.elapsed() < duration {
-            tournament.flatten_participants();
-            tournament.run_tournament();
-            tournament.stats();
-            special_agents.push(tournament.find_special_agents());
-            tournament.adjust_agents();
-        }
+    //     // Keep track of how well special agents do each round, only save them
+    //     // to file after the one minute has finished.
+    //     let mut special_agents: Vec<(usize, usize)> = Vec::new();
 
-        // Save data to file
-        save_tournament(&tournament, history_folder);
-        save_special_agents(special_agents, tournament.generation);
-    }
+    //     // Run generations
+    //     while start_time.elapsed() < duration {
+    //         // tournament.flatten_participants();
+    //         let tournament_start_time = Instant::now();
+    //         tournament.run_tournament();
+    //         tournament.sort_by_wins();
+    //         tournament.stats();
+    //         special_agents.push(tournament.find_special_agents());
+    //         tournament.adjust_agents();
+    //         let duration = tournament_start_time.elapsed();
+    //         tournament.training_time += duration;
+    //     }
+
+    //     // Save data to file
+    //     save_tournament(&tournament, history_folder);
+    //     save_special_agents(special_agents, tournament.generation);
+    // }
 }
