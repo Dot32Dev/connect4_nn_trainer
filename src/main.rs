@@ -218,7 +218,7 @@ impl Tournament {
 
         // Add Neural Networks (Subtracting 2 to account for other AIs)
         for _ in 0..num_participants - 2 {
-            participants.push(Box::new(NeuralNetwork::new(&[42, 64, 64, 7]))
+            participants.push(Box::new(NeuralNetwork::new(&[42, 64, 64, 64, 64, 7]))
                 as Box<dyn Participant>);
             participants_win_count.push(0);
         }
@@ -257,13 +257,13 @@ impl Tournament {
                             // player_wins[agent] += 1;
                             self.participants_win_count[pair_index[agent]] += 1;
 
-                            // Print the last round
+                            // // Print the last round
                             if i == self.participants.len() - 1 {
-                                println!(
-                                    "Winner: {:?}\n loser {:?}",
-                                    pair[agent], pair[opponent],
-                                );
-                                println!("{}", game);
+                                // println!(
+                                //     "Winner: {:?}\n loser {:?}",
+                                //     pair[agent], pair[opponent],
+                                // );
+                                // println!("{}", game);
                             }
 
                             break 'game;
@@ -273,10 +273,10 @@ impl Tournament {
                             break 'game;
                         }
 
-                        // Print the last round
-                        if i == self.participants.len() - 1 {
-                            println!("{}", game);
-                        }
+                        // // Print the last round
+                        // if i == self.participants.len() - 1 {
+                        //     println!("{}", game);
+                        // }
                     }
                 }
             }
@@ -417,9 +417,9 @@ impl Tournament {
     // }
 
     fn stats(&self) {
-        println!("Generation {}", self.generation);
+        println!("Generation {}, {} seconds", self.generation, self.training_time.as_secs());
         // println!("The number of agents was: {}", self.participants.len());
-        println!("{} seconds spent in training", self.training_time.as_secs());
+        // println!("{} seconds spent in training", self.training_time.as_secs());
         // for i in 0..self.participants.len() {
         //     println!(
         //         "{} eliminated in round {}",
@@ -500,7 +500,7 @@ impl Tournament {
         for (i, agent) in self.participants.iter_mut().enumerate() {
             let range_multiplier: f64 = 1.0 - total_participants / i as f64;
             if range_multiplier > 0.2 {
-                agent.adjust(range_multiplier * 0.04);
+                agent.adjust(range_multiplier * 0.5);
             }
         }
     }
@@ -532,24 +532,29 @@ fn load_tournament(filepath: impl AsRef<Path>) -> Tournament {
 
 fn save_special_agents(agents: Vec<(usize, usize)>, generation: u32) {
     // Open the file for appending, create if it doesn't exist
-    let file = OpenOptions::new()
+    match OpenOptions::new()
         .append(true)
         .create(true)
         .open("special_agents.csv")
-        .unwrap();
-    let mut writer = BufWriter::new(file);
+    {
+        Err(e) => {println!("{:?}", e)},
+        Ok(file) => {
+            let mut writer = BufWriter::new(file);
 
-    // If the CSV was empty, add the column names
-    if writer.get_ref().metadata().unwrap().len() == 0 {
-        writeln!(writer, "Generation, Tower Agent, Random Agent").unwrap();
-    }
-
-    // Append agents with generation number
-    let length = agents.len();
-    for (i, (tower_agent, random_agent)) in agents.into_iter().enumerate() {
-        let gen = generation as usize - (length - 1 - i); // Decrease generation
-        writeln!(writer, "{}, {}, {}", gen, tower_agent, random_agent).unwrap();
-    }
+            // If the CSV was empty, add the column names
+            if writer.get_ref().metadata().unwrap().len() == 0 {
+                writeln!(writer, "Generation, Tower Agent, Random Agent").unwrap();
+            }
+        
+            // Append agents with generation number
+            let length = agents.len();
+            for (i, (tower_agent, random_agent)) in agents.into_iter().enumerate() {
+                let gen = generation as usize - (length - 1 - i); // Decrease generation
+                writeln!(writer, "{}, {}, {}", gen, tower_agent, random_agent).unwrap();
+            }
+        }
+    };
+    
 }
 
 fn main() {
@@ -569,7 +574,7 @@ fn main() {
 
     if entries.is_empty() {
         // Create a new tournament if the folder is empty
-        tournament = Tournament::new_random(100);
+        tournament = Tournament::new_random(1500);
         save_tournament(&tournament, history_folder);
     } else {
         // Load the most recent generation
@@ -577,34 +582,36 @@ fn main() {
         tournament = load_tournament(latest_file.path());
     }
 
-    let latest_file = entries.last().unwrap();
-    tournament = load_tournament(latest_file.path());
-    tournament.run_tournament();
+    // let latest_file = entries.last().unwrap();
+    // tournament = load_tournament(latest_file.path());
+    // tournament.run_tournament();
 
-    // loop {
-    //     // Run for one minute before saving to file
-    //     let start_time = Instant::now();
-    //     let duration = Duration::from_secs(60);
+    tournament = load_tournament("./network_history/Generation 26.ron");
 
-    //     // Keep track of how well special agents do each round, only save them
-    //     // to file after the one minute has finished.
-    //     let mut special_agents: Vec<(usize, usize)> = Vec::new();
+    loop {
+        // Run for one minute before saving to file
+        let start_time = Instant::now();
+        let duration = Duration::from_secs(60);
 
-    //     // Run generations
-    //     while start_time.elapsed() < duration {
-    //         // tournament.flatten_participants();
-    //         let tournament_start_time = Instant::now();
-    //         tournament.run_tournament();
-    //         tournament.sort_by_wins();
-    //         tournament.stats();
-    //         special_agents.push(tournament.find_special_agents());
-    //         tournament.adjust_agents();
-    //         let duration = tournament_start_time.elapsed();
-    //         tournament.training_time += duration;
-    //     }
+        // Keep track of how well special agents do each round, only save them
+        // to file after the one minute has finished.
+        let mut special_agents: Vec<(usize, usize)> = Vec::new();
 
-    //     // Save data to file
-    //     save_tournament(&tournament, history_folder);
-    //     save_special_agents(special_agents, tournament.generation);
-    // }
+        // Run generations
+        while start_time.elapsed() < duration {
+            // tournament.flatten_participants();
+            let tournament_start_time = Instant::now();
+            tournament.run_tournament();
+            tournament.sort_by_wins();
+            tournament.stats();
+            special_agents.push(tournament.find_special_agents());
+            tournament.adjust_agents();
+            let duration = tournament_start_time.elapsed();
+            tournament.training_time += duration;
+        }
+
+        // Save data to file
+        save_tournament(&tournament, history_folder);
+        save_special_agents(special_agents, tournament.generation);
+    }
 }
