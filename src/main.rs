@@ -218,8 +218,9 @@ impl Tournament {
 
         // Add Neural Networks (Subtracting 2 to account for other AIs)
         for _ in 0..num_participants - 2 {
-            participants.push(Box::new(NeuralNetwork::new(&[42, 64, 64, 64, 64, 7]))
-                as Box<dyn Participant>);
+            participants
+                .push(Box::new(NeuralNetwork::new(&[42, 64, 64, 64, 64, 7]))
+                    as Box<dyn Participant>);
             participants_win_count.push(0);
         }
 
@@ -243,40 +244,52 @@ impl Tournament {
         for (i, agent) in self.participants.iter().enumerate() {
             for (j, opponent) in self.participants.iter().enumerate() {
                 if i != j {
-                    let mut game = Bitboard::new();
-                    let pair = [agent, opponent];
-                    let pair_index = [i, j];
-                    'game: loop {
-                        let agent = game.move_counter & 1;
-                        let opponent = 1 - (game.move_counter & 1);
+                    for k in 0..2 {
+                        let mut game = Bitboard::new();
+                        let pair: [&Box<dyn Participant>; 2];
+                        let pair_index: [usize; 2];
 
-                        pair[agent].make_move(&mut game, agent, opponent);
+                        if k == 0 {
+                            pair = [agent, opponent];
+                            pair_index = [i, j];
+                        } else {
+                            pair = [opponent, agent];
+                            pair_index = [j, i];
+                        }
 
-                        if game.check_win() {
-                            // winners.push(full_idx + agent);
-                            // player_wins[agent] += 1;
-                            self.participants_win_count[pair_index[agent]] += 1;
+                        'game: loop {
+                            let agent = game.move_counter & 1;
+                            let opponent = 1 - (game.move_counter & 1);
 
-                            // // Print the last round
-                            if i == self.participants.len() - 1 {
-                                // println!(
-                                //     "Winner: {:?}\n loser {:?}",
-                                //     pair[agent], pair[opponent],
-                                // );
-                                // println!("{}", game);
+                            pair[agent].make_move(&mut game, agent, opponent);
+
+                            if game.check_win() {
+                                // winners.push(full_idx + agent);
+                                // player_wins[agent] += 1;
+                                self.participants_win_count
+                                    [pair_index[agent]] += 1;
+
+                                // // Print the last round
+                                if i == self.participants.len() - 1 {
+                                    // println!(
+                                    //     "Winner: {:?}\n loser {:?}",
+                                    //     pair[agent], pair[opponent],
+                                    // );
+                                    // println!("{}", game);
+                                }
+
+                                break 'game;
                             }
 
-                            break 'game;
-                        }
+                            if game.move_counter >= 42 {
+                                break 'game;
+                            }
 
-                        if game.move_counter >= 42 {
-                            break 'game;
+                            // // Print the last round
+                            // if i == self.participants.len() - 1 {
+                            //     println!("{}", game);
+                            // }
                         }
-
-                        // // Print the last round
-                        // if i == self.participants.len() - 1 {
-                        //     println!("{}", game);
-                        // }
                     }
                 }
             }
@@ -417,7 +430,11 @@ impl Tournament {
     // }
 
     fn stats(&self) {
-        println!("Generation {}, {} seconds", self.generation, self.training_time.as_secs());
+        println!(
+            "Generation {}, {} seconds",
+            self.generation,
+            self.training_time.as_secs()
+        );
         // println!("The number of agents was: {}", self.participants.len());
         // println!("{} seconds spent in training", self.training_time.as_secs());
         // for i in 0..self.participants.len() {
@@ -537,24 +554,29 @@ fn save_special_agents(agents: Vec<(usize, usize)>, generation: u32) {
         .create(true)
         .open("special_agents.csv")
     {
-        Err(e) => {println!("{:?}", e)},
+        Err(e) => {
+            println!("{:?}", e)
+        }
         Ok(file) => {
             let mut writer = BufWriter::new(file);
 
             // If the CSV was empty, add the column names
             if writer.get_ref().metadata().unwrap().len() == 0 {
-                writeln!(writer, "Generation, Tower Agent, Random Agent").unwrap();
+                writeln!(writer, "Generation, Tower Agent, Random Agent")
+                    .unwrap();
             }
-        
+
             // Append agents with generation number
             let length = agents.len();
-            for (i, (tower_agent, random_agent)) in agents.into_iter().enumerate() {
+            for (i, (tower_agent, random_agent)) in
+                agents.into_iter().enumerate()
+            {
                 let gen = generation as usize - (length - 1 - i); // Decrease generation
-                writeln!(writer, "{}, {}, {}", gen, tower_agent, random_agent).unwrap();
+                writeln!(writer, "{}, {}, {}", gen, tower_agent, random_agent)
+                    .unwrap();
             }
         }
     };
-    
 }
 
 fn main() {
