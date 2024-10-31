@@ -521,17 +521,48 @@ impl Tournament {
             }
         }
     }
+
+    // fn export_ai(&self) {
+    //     let filename = format!("Generation_{}_AI.ron", self.generation);
+    //     let serialised = ron::ser::to_string_pretty(
+    //         &*self.participants[0],
+    //         ron::ser::PrettyConfig::default(),
+    //     )
+    //     .expect("Failed to serialize tournament");
+
+    //     let mut file = File::create(filename).expect("Failed to create file");
+    //     file.write_all(serialised.as_bytes())
+    //         .expect("Failed to write to file");
+    // }
+
+    fn export_ai(&self) {
+        let filename = format!("generation_{}_ai.json", self.generation);
+        let serialised = serde_json::to_string_pretty(&*self.participants[0])
+            .expect("Failed to serialize tournament");
+
+        let mut file = File::create(filename).expect("Failed to create file");
+        file.write_all(serialised.as_bytes())
+            .expect("Failed to write to file");
+    }
+
+    fn import_ai(&mut self) {
+        let mut file = File::open("Generation_452_AI.ron").unwrap();
+        let mut contents = String::new();
+        file.read_to_string(&mut contents).unwrap();
+
+        let ai =
+            ron::from_str(&contents).expect("Failed to deserialize tournament");
+
+        self.participants[0] = ai;
+    }
 }
 
 fn save_tournament(tournament: &Tournament, folder: &Path) {
     let filename = format!("Generation {}.ron", tournament.generation);
     let filepath = folder.join(filename);
 
-    let serialized = ron::ser::to_string_pretty(
-        tournament,
-        ron::ser::PrettyConfig::default(),
-    )
-    .expect("Failed to serialize tournament");
+    let serialized = ron::ser::to_string(tournament)
+        .expect("Failed to serialize tournament");
 
     let mut file = File::create(filepath).expect("Failed to create file");
     file.write_all(serialized.as_bytes())
@@ -601,39 +632,40 @@ fn main() {
     } else {
         // Load the most recent generation
         let latest_file = entries.last().unwrap();
-        tournament = load_tournament(latest_file.path());
+        // tournament = load_tournament(latest_file.path());
     }
 
     // let latest_file = entries.last().unwrap();
     // tournament = load_tournament(latest_file.path());
     // tournament.run_tournament();
 
-    tournament = load_tournament("./network_history/Generation 26.ron");
+    tournament = load_tournament("./network_history/Generation 452.ron");
+    tournament.export_ai();
 
-    loop {
-        // Run for one minute before saving to file
-        let start_time = Instant::now();
-        let duration = Duration::from_secs(60);
+    // loop {
+    //     // Run for one minute before saving to file
+    //     let start_time = Instant::now();
+    //     let duration = Duration::from_secs(60);
 
-        // Keep track of how well special agents do each round, only save them
-        // to file after the one minute has finished.
-        let mut special_agents: Vec<(usize, usize)> = Vec::new();
+    //     // Keep track of how well special agents do each round, only save them
+    //     // to file after the one minute has finished.
+    //     let mut special_agents: Vec<(usize, usize)> = Vec::new();
 
-        // Run generations
-        while start_time.elapsed() < duration {
-            // tournament.flatten_participants();
-            let tournament_start_time = Instant::now();
-            tournament.run_tournament();
-            tournament.sort_by_wins();
-            tournament.stats();
-            special_agents.push(tournament.find_special_agents());
-            tournament.adjust_agents();
-            let duration = tournament_start_time.elapsed();
-            tournament.training_time += duration;
-        }
+    //     // Run generations
+    //     while start_time.elapsed() < duration {
+    //         // tournament.flatten_participants();
+    //         let tournament_start_time = Instant::now();
+    //         tournament.run_tournament();
+    //         tournament.sort_by_wins();
+    //         tournament.stats();
+    //         special_agents.push(tournament.find_special_agents());
+    //         tournament.adjust_agents();
+    //         let duration = tournament_start_time.elapsed();
+    //         tournament.training_time += duration;
+    //     }
 
-        // Save data to file
-        save_tournament(&tournament, history_folder);
-        save_special_agents(special_agents, tournament.generation);
-    }
+    //     // Save data to file
+    //     save_tournament(&tournament, history_folder);
+    //     save_special_agents(special_agents, tournament.generation);
+    // }
 }

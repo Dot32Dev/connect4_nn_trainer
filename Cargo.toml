@@ -10,3 +10,4 @@ connect4_board_library = { git = "https://github.com/Dot32Dev/barebones_connectf
 serde = { version = "1.0", features = ["derive"] }
 typetag = "0.2"
 ron = "0.8"
+serde_json = "1.0"
